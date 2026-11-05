@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>html{color-scheme:light}body{margin:0;font:14px system-ui,sans-serif}[hidden]{display:none!important}img{max-width:100%}</style>
+<title>Hours Log</title></head><body>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: one narrow column, a clock card on top, then the range and the day-by-day log.
+     Timesheet vernacular: ruled rows, mono figures, a signal-amber "on the clock" state. */
+  :root {
+    --bg: #eef1f4;
+    --card: #ffffff;
+    --fg: #1b2330;
+    --muted: #5c6878;
+    --line: #d6dce4;
+    --accent: #135e6e;
+    --accent-fg: #ffffff;
+    --live: #b5650a;
+    --live-bg: #fbeed9;
+    --danger: #a8281f;
+    --field: #f7f9fb;
+    --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f151c; --card: #18212b; --fg: #e6ebf1; --muted: #93a0b0; --line: #2a3644;
+      --accent: #5fb8c9; --accent-fg: #0b1a1f; --live: #f0a850; --live-bg: #33250f;
+      --danger: #f08a82; --field: #121a22; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f151c; --card: #18212b; --fg: #e6ebf1; --muted: #93a0b0; --line: #2a3644;
+    --accent: #5fb8c9; --accent-fg: #0b1a1f; --live: #f0a850; --live-bg: #33250f;
+    --danger: #f08a82; --field: #121a22; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font); margin: 0;
+    padding-block: 20px 56px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 1.5rem; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+  h2 { font-size: 0.78rem; margin: 0 0 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .status { font-size: 0.8rem; color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 16px; min-width: 0; }
+  label { display: block; font-size: 0.82rem; color: var(--muted); margin-bottom: 4px; font-weight: 500; }
+  input, textarea, select {
+    width: 100%; font: inherit; color: var(--fg); background: var(--field); border: 1px solid var(--line);
+    border-radius: 4px; padding: 9px 10px; min-width: 0;
+  }
+  textarea { resize: vertical; min-height: 72px; }
+  input[type="checkbox"] { width: auto; margin-right: 8px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; border-radius: 4px; padding: 9px 16px;
+    border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  button.live { background: var(--live); color: #fff; border-color: var(--live); }
+  :root[data-theme="dark"] button.live { color: #1a1204; }
+  button.quiet { font-weight: 500; padding: 6px 10px; font-size: 0.85rem; }
+  button.danger { color: var(--danger); border-color: var(--danger); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  :is(button, input, textarea, select, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > * { flex: 1 1 140px; min-width: 0; }
+  .stack { display: flex; flex-direction: column; gap: 12px; }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* clock */
+  .clock.running { border-color: var(--live); background: var(--live-bg); }
+  .elapsed { font: 600 2.6rem/1.1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .since { color: var(--muted); font-size: 0.85rem; }
+  .planned-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+  /* range */
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .presets button { padding: 5px 10px; font-size: 0.82rem; font-weight: 500; }
+  .presets button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  .summary { display: flex; gap: 24px; flex-wrap: wrap; margin: 14px 0 4px; }
+  .summary .n { font: 600 1.5rem/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+  .summary .l { font-size: 0.78rem; color: var(--muted); }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
+  th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; padding-right: 0; }
+  .exports { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+
+  /* day groups */
+  .day { border-top: 2px solid var(--fg); padding-top: 8px; margin-top: 14px; }
+  .day:first-child { margin-top: 0; }
+  .day-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .day-head .d { font-weight: 600; }
+  .entry { border-bottom: 1px solid var(--line); padding: 10px 0; display: flex; flex-direction: column; gap: 6px; }
+  .entry:last-child { border-bottom: 0; }
+  .entry-top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+  .times { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 0.9rem; }
+  .tag { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; color: var(--muted); margin-left: 8px; }
+  .tag.live { color: var(--live); border-color: var(--live); }
+  .lab { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .txt { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+  .none { color: var(--muted); font-style: italic; }
+  .entry-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  details.card > summary { cursor: pointer; font-weight: 600; list-style: none; }
+  details.card > summary::-webkit-details-marker { display: none; }
+  details.card > summary::before { content: "+ "; font-family: var(--mono); color: var(--accent); }
+  details.card[open] > summary::before { content: "\2212 "; }
+  details.card[open] > summary { margin-bottom: 12px; }
+  .empty { color: var(--muted); padding: 8px 0; }
+  .msg { min-height: 1.2em; font-size: 0.85rem; color: var(--danger); }
+  .msg.ok { color: var(--accent); }
+  .hint { font-size: 0.8rem; color: var(--muted); margin: 0; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Hours Log</h1>
+    <span class="status" id="status" role="status">Loading…</span>
+  </header>
+
+  <section class="card clock" id="clock" aria-label="Clock">
+    <div id="idle" class="stack">
+      <h2>Clock</h2>
+      <div>
+        <label for="planned">What I plan to work on</label>
+        <textarea id="planned" placeholder="e.g. Fix the saved job sheet screen in Construction Passport"></textarea>
+      </div>
+      <div class="actions"><button class="primary" id="startBtn" type="button">Start clock</button></div>
+    </div>
+    <div id="running" class="stack" hidden>
+      <h2>On the clock</h2>
+      <div>
+        <div class="elapsed" id="elapsed">0:00:00</div>
+        <div class="since" id="since"></div>
+      </div>
+      <div>
+        <div class="lab">Planned</div>
+        <p class="planned-text txt" id="runPlanned"></p>
+      </div>
+      <div>
+        <label for="done">What I got done</label>
+        <textarea id="done" placeholder="What did you actually finish or move forward?"></textarea>
+      </div>
+      <div class="actions">
+        <button class="live" id="stopBtn" type="button">Stop and save</button>
+        <button class="quiet danger" id="discardBtn" type="button">Discard this session</button>
+        <span id="discardAsk" hidden>
+          <span class="hint">Delete this running session?</span>
+          <button class="quiet danger" id="discardYes" type="button">Yes, delete</button>
+          <button class="quiet" id="discardNo" type="button">Keep it</button>
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <details class="card" id="addBox" open>
+    <summary>Add time you already worked</summary>
+    <form id="addForm" class="stack" autocomplete="off">
+      <div class="row">
+        <div><label for="addDate">Date</label><input type="date" id="addDate" required></div>
+        <div><label for="addStart">Start</label><input type="time" id="addStart" required></div>
+        <div><label for="addEnd">Finish</label><input type="time" id="addEnd" required></div>
+      </div>
+      <div><label for="addPlanned">What I planned to work on</label><textarea id="addPlanned"></textarea></div>
+      <div><label for="addDone">What I got done</label><textarea id="addDone"></textarea></div>
+      <label style="display:flex;align-items:flex-start;color:var(--fg);font-size:0.9rem;">
+        <input type="checkbox" id="addLate" checked>
+        <span>I'm entering this afterwards from memory or records. It will be marked on the timesheet.</span>
+      </label>
+      <div class="actions"><button class="primary" type="submit">Add entry</button><span class="msg" id="addMsg" role="status"></span></div>
+    </form>
+  </details>
+
+  <section class="card" aria-label="Range and totals">
+    <h2>Range</h2>
+    <div class="presets" id="presets"></div>
+    <div class="row">
+      <div><label for="from">From</label><input type="date" id="from"></div>
+      <div><label for="to">To</label><input type="date" id="to"></div>
+    </div>
+    <div class="summary" id="summary"></div>
+    <div class="scroll" id="weeks"></div>
+    <div class="row" style="margin-top:14px">
+      <div><label for="pname">Name on timesheet</label><input id="pname"></div>
+      <div><label for="pemp">Employer on timesheet</label><input id="pemp"></div>
+    </div>
+    <div class="exports">
+      <button type="button" id="expTimesheet" class="primary">Timesheet file (.html)</button>
+      <button type="button" id="expDetail">Entries (.csv)</button>
+      <button type="button" id="expDaily">Daily totals (.csv)</button>
+    </div>
+    <div class="msg" id="expMsg" role="status"></div>
+  </section>
+
+  <section class="card" aria-label="Log">
+    <h2>Log</h2>
+    <div id="log"></div>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (s) { return document.querySelector(s); };
+  var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var LS_ENTRIES = "hourslog.entries.v1", LS_PROFILE = "hourslog.profile.v1";
+
+  var entries = [];
+  var profile = { name: "Jacob Siler", employer: "Prime Peak Limited t/a Prime Management 18" };
+  var db = null, dl = null, mode = "loading";
+  var editingId = null, confirmId = null, ticker = null, range = { from: "", to: "", preset: "week" };
+
+  /* ---------- helpers ---------- */
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+  function dkey(ms) { var d = new Date(ms); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function parseKey(k) { var p = k.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function addDays(k, n) { var d = parseKey(k); d.setDate(d.getDate() + n); return dkey(d.getTime()); }
+  function mondayOf(k) { var d = parseKey(k); var dow = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dow); return dkey(d.getTime()); }
+  function prettyDate(k) { var d = parseKey(k); return DAYS[d.getDay()] + " " + d.getDate() + " " + MONTHS[d.getMonth()] + " " + d.getFullYear(); }
+  function shortDate(k) { var d = parseKey(k); return d.getDate() + " " + MONTHS[d.getMonth()]; }
+  function hhmm(ms) { var d = new Date(ms); return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+  function localInput(ms) { return dkey(ms) + "T" + hhmm(ms); }
+  function hm(ms) { var m = Math.round(ms / 60000); return Math.floor(m / 60) + ":" + pad(m % 60); }
+  function dec(ms) { return (Math.round(ms / 36000) / 100).toFixed(2); }
+  function dur(e) { return e.end ? Math.max(0, e.end - e.start) : 0; }
+  function uid() { return "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+  function todayKey() { return dkey(Date.now()); }
+  function h(tag, attrs, kids) {
+    var el = document.createElement(tag);
+    if (attrs) for (var k in attrs) {
+      if (k === "text") el.textContent = attrs[k];
+      else if (k === "class") el.className = attrs[k];
+      else if (k.slice(0, 2) === "on") el.addEventListener(k.slice(2), attrs[k]);
+      else el.setAttribute(k, attrs[k]);
+    }
+    (kids || []).forEach(function (c) { if (c) el.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return el;
+  }
+  function say(el, text, ok) { el.textContent = text || ""; el.className = "msg" + (ok ? " ok" : ""); }
+
+  /* ---------- storage ---------- */
+  function lsGet(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } }
+  function clean(e) { return { start: e.start, end: e.end == null ? null : e.end, planned: e.planned || "", done: e.done || "", late: !!e.late }; }
+
+  function saveEntry(e) {
+    if (db) {
+      return db.collection("entries").doc(e.id).set(clean(e)).catch(function () { say($("#expMsg"), "Could not save. Check your connection and try again."); });
+    }
+    var i = entries.findIndex(function (x) { return x.id === e.id; });
+    if (i >= 0) entries[i] = e; else entries.push(e);
+    lsSet(LS_ENTRIES, entries); renderAll(); return Promise.resolve();
+  }
+  function removeEntry(id) {
+    if (db) return db.collection("entries").doc(id).delete().catch(function () { say($("#expMsg"), "Could not delete. Try again."); });
+    entries = entries.filter(function (x) { return x.id !== id; }); lsSet(LS_ENTRIES, entries); renderAll(); return Promise.resolve();
+  }
+  var profileTimer = null;
+  function saveProfile() {
+    profile = { name: $("#pname").value, employer: $("#pemp").value };
+    clearTimeout(profileTimer);
+    profileTimer = setTimeout(function () {
+      if (db) db.doc("meta/profile").set(profile).catch(function () {}); else lsSet(LS_PROFILE, profile);
+    }, 600);
+  }
+
+  /* ---------- clock ---------- */
+  function running() { return entries.find(function (e) { return !e.end; }) || null; }
+  function renderClock() {
+    var r = running();
+    $("#idle").hidden = !!r; $("#running").hidden = !r;
+    $("#clock").className = "card clock" + (r ? " running" : "");
+    clearInterval(ticker); ticker = null;
+    if (r) {
+      $("#runPlanned").textContent = r.planned || "(nothing noted)";
+      $("#since").textContent = "Started " + prettyDate(dkey(r.start)) + " at " + hhmm(r.start);
+      var tick = function () {
+        var s = Math.max(0, Math.floor((Date.now() - r.start) / 1000));
+        $("#elapsed").textContent = Math.floor(s / 3600) + ":" + pad(Math.floor(s / 60) % 60) + ":" + pad(s % 60);
+      };
+      tick(); ticker = setInterval(tick, 1000);
+    }
+  }
+  $("#startBtn").addEventListener("click", function () {
+    if (running()) return;
+    var e = { id: uid(), start: Date.now(), end: null, planned: $("#planned").value.trim(), done: "", late: false };
+    $("#planned").value = "";
+    saveEntry(e);
+  });
+  $("#stopBtn").addEventListener("click", function () {
+    var r = running(); if (!r) return;
+    r.end = Math.max(Date.now(), r.start + 1000); r.done = $("#done").value.trim(); $("#done").value = "";
+    saveEntry(r);
+  });
+  $("#discardBtn").addEventListener("click", function () { $("#discardBtn").hidden = true; $("#discardAsk").hidden = false; });
+  $("#discardNo").addEventListener("click", function () { $("#discardBtn").hidden = false; $("#discardAsk").hidden = true; });
+  $("#discardYes").addEventListener("click", function () {
+    var r = running(); $("#discardBtn").hidden = false; $("#discardAsk").hidden = true;
+    if (r) removeEntry(r.id);
+  });
+
+  /* ---------- add past entry ---------- */
+  $("#addForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var d = $("#addDate").value, s = $("#addStart").value, f = $("#addEnd").value, m = $("#addMsg");
+    var start = new Date(d + "T" + s).getTime(), end = new Date(d + "T" + f).getTime();
+    if (!(end > start)) { say(m, "Finish time must be after the start time."); return; }
+    saveEntry({ id: uid(), start: start, end: end, planned: $("#addPlanned").value.trim(), done: $("#addDone").value.trim(), late: $("#addLate").checked });
+    $("#addPlanned").value = ""; $("#addDone").value = "";
+    say(m, "Added " + hm(end - start) + " on " + prettyDate(d) + ".", true);
+    setTimeout(function () { say(m, ""); }, 4000);
+  });
+
+  /* ---------- range ---------- */
+  var PRESETS = [
+    ["today", "Today"], ["week", "This week"], ["lastweek", "Last week"], ["month", "This month"], ["sep", "Since 1 Sep"], ["all", "All"]
+  ];
+  function applyPreset(p) {
+    var t = todayKey(), mon = mondayOf(t);
+    range.preset = p;
+    if (p === "today") { range.from = t; range.to = t; }
+    else if (p === "week") { range.from = mon; range.to = addDays(mon, 6); }
+    else if (p === "lastweek") { range.from = addDays(mon, -7); range.to = addDays(mon, -1); }
+    else if (p === "month") { range.from = t.slice(0, 8) + "01"; range.to = t; }
+    else if (p === "sep") { range.from = "2026-09-01"; range.to = t; }
+    else { range.from = "2000-01-01"; range.to = "2099-12-31"; }
+    $("#from").value = p === "all" ? "" : range.from; $("#to").value = p === "all" ? "" : range.to;
+    renderAll();
+  }
+  function renderPresets() {
+    var box = $("#presets"); box.textContent = "";
+    PRESETS.forEach(function (p) {
+      var b = h("button", { type: "button", text: p[1], "aria-pressed": String(range.preset === p[0]) });
+      b.addEventListener("click", function () { applyPreset(p[0]); });
+      box.appendChild(b);
+    });
+  }
+  function onDateChange() {
+    range.preset = "custom";
+    range.from = $("#from").value || "2000-01-01"; range.to = $("#to").value || "2099-12-31";
+    renderAll();
+  }
+  $("#from").addEventListener("change", onDateChange);
+  $("#to").addEventListener("change", onDateChange);
+
+  function inRange() {
+    return entries.filter(function (e) { var k = dkey(e.start); return k >= range.from && k <= range.to; })
+      .sort(function (a, b) { return a.start - b.start; });
+  }
+  function groupDays(list) {
+    var map = {}, order = [];
+    list.forEach(function (e) { var k = dkey(e.start); if (!map[k]) { map[k] = { key: k, items: [], ms: 0 }; order.push(k); } map[k].items.push(e); map[k].ms += dur(e); });
+    return order.map(function (k) { return map[k]; });
+  }
+  function groupWeeks(days) {
+    var map = {}, order = [];
+    days.forEach(function (d) { var w = mondayOf(d.key); if (!map[w]) { map[w] = { key: w, ms: 0, days: 0 }; order.push(w); } map[w].ms += d.ms; if (d.ms > 0) map[w].days++; });
+    return order.map(function (k) { return map[k]; });
+  }
+
+  /* ---------- render ---------- */
+  function renderSummary(days) {
+    var total = days.reduce(function (a, d) { return a + d.ms; }, 0);
+    var worked = days.filter(function (d) { return d.ms > 0; }).length;
+    var s = $("#summary"); s.textContent = "";
+    [[hm(total), "hours (" + dec(total) + " decimal)"], [String(worked), "days worked"], [worked ? hm(total / worked) : "0:00", "average per day worked"]].forEach(function (x) {
+      s.appendChild(h("div", null, [h("div", { class: "n", text: x[0] }), h("div", { class: "l", text: x[1] })]));
+    });
+    var weeks = groupWeeks(days), w = $("#weeks"); w.textContent = "";
+    if (weeks.length > 1) {
+      var t = h("table", null, [
+        h("thead", null, [h("tr", null, [h("th", { text: "Week starting" }), h("th", { class: "num", text: "Days" }), h("th", { class: "num", text: "Hours" }), h("th", { class: "num", text: "Decimal" })])]),
+        h("tbody", null, weeks.map(function (x) {
+          return h("tr", null, [h("td", { text: prettyDate(x.key) }), h("td", { class: "num mono", text: String(x.days) }), h("td", { class: "num mono", text: hm(x.ms) }), h("td", { class: "num mono", text: dec(x.ms) })]);
+        }))
+      ]);
+      w.appendChild(t);
+    }
+  }
+  function renderEntry(e) {
+    if (editingId === e.id) return renderEditor(e);
+    var isRun = !e.end;
+    var top = h("div", { class: "entry-top" }, [
+      h("span", { class: "times", text: hhmm(e.start) + (isRun ? " – now" : " – " + hhmm(e.end)) + (isRun ? "" : "   " + hm(dur(e))) }),
+      h("span", null, [
+        isRun ? h("span", { class: "tag live", text: "Running" }) : null,
+        e.late ? h("span", { class: "tag", text: "Entered afterwards" }) : null
+      ])
+    ]);
+    var kids = [top,
+      h("div", null, [h("div", { class: "lab", text: "Planned" }), e.planned ? h("p", { class: "txt", text: e.planned }) : h("p", { class: "txt none", text: "Not noted" })]),
+      isRun ? null : h("div", null, [h("div", { class: "lab", text: "Done" }), e.done ? h("p", { class: "txt", text: e.done }) : h("p", { class: "txt none", text: "Not noted" })])
+    ];
+    if (!isRun) {
+      var acts = h("div", { class: "entry-actions" });
+      if (confirmId === e.id) {
+        acts.appendChild(h("span", { class: "hint", text: "Delete this entry?" }));
+        acts.appendChild(h("button", { class: "quiet danger", type: "button", text: "Yes, delete", onclick: function () { confirmId = null; removeEntry(e.id); } }));
+        acts.appendChild(h("button", { class: "quiet", type: "button", text: "Keep", onclick: function () { confirmId = null; renderLog(); } }));
+      } else {
+        acts.appendChild(h("button", { class: "quiet", type: "button", text: "Edit", onclick: function () { editingId = e.id; renderLog(); } }));
+        acts.appendChild(h("button", { class: "quiet", type: "button", text: "Delete", onclick: function () { confirmId = e.id; renderLog(); } }));
+      }
+      kids.push(acts);
+    }
+    return h("div", { class: "entry" }, kids);
+  }
+  function renderEditor(e) {
+    var id = e.id;
+    var st = h("input", { type: "datetime-local", id: "edS" }), en = h("input", { type: "datetime-local", id: "edE" });
+    st.value = localInput(e.start); en.value = e.end ? localInput(e.end) : "";
+    var pl = h("textarea", { id: "edP" }); pl.value = e.planned || "";
+    var dn = h("textarea", { id: "edD" }); dn.value = e.done || "";
+    var late = h("input", { type: "checkbox", id: "edL" }); late.checked = !!e.late;
+    var msg = h("span", { class: "msg", role: "status" });
+    return h("div", { class: "entry stack" }, [
+      h("div", { class: "row" }, [h("div", null, [h("label", { for: "edS", text: "Start" }), st]), h("div", null, [h("label", { for: "edE", text: "Finish" }), en])]),
+      h("div", null, [h("label", { for: "edP", text: "Planned" }), pl]),
+      h("div", null, [h("label", { for: "edD", text: "Done" }), dn]),
+      h("label", { style: "display:flex;align-items:center;color:var(--fg);font-size:0.9rem;" }, [late, h("span", { text: "Entered afterwards" })]),
+      h("div", { class: "actions" }, [
+        h("button", { class: "primary", type: "button", text: "Save changes", onclick: function () {
+          var s = new Date(st.value).getTime(), f = new Date(en.value).getTime();
+          if (isNaN(s) || isNaN(f) || f <= s) { say(msg, "Finish must be after the start."); return; }
+          editingId = null; saveEntry({ id: id, start: s, end: f, planned: pl.value.trim(), done: dn.value.trim(), late: late.checked });
+        } }),
+        h("button", { type: "button", text: "Cancel", onclick: function () { editingId = null; renderLog(); } }),
+        msg
+      ])
+    ]);
+  }
+  function renderLog() {
+    var days = groupDays(inRange()).reverse(), box = $("#log"); box.textContent = "";
+    renderSummary(days.slice().reverse());
+    if (!days.length) {
+      box.appendChild(h("div", { class: "empty", text: mode === "loading" ? "Loading your entries…" : "No hours logged in this range yet. Start the clock above, or add time you already worked." }));
+      return;
+    }
+    days.forEach(function (d) {
+      var items = d.items.slice().sort(function (a, b) { return b.start - a.start; });
+      box.appendChild(h("div", { class: "day" }, [
+        h("div", { class: "day-head" }, [h("span", { class: "d", text: prettyDate(d.key) }), h("span", { class: "mono", text: hm(d.ms) + "  (" + dec(d.ms) + " h)" })])
+      ].concat(items.map(renderEntry))));
+    });
+  }
+  function renderAll() { renderClock(); renderPresets(); renderLog(); }
+
+  /* ---------- exports ---------- */
+  function csvCell(v) { v = String(v == null ? "" : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function csv(rows) { return "﻿" + rows.map(function (r) { return r.map(csvCell).join(","); }).join("\r\n") + "\r\n"; }
+  function finished() { return inRange().filter(function (e) { return e.end; }); }
+  function rangeLabel() {
+    var l = finished(); if (!l.length) return "no entries";
+    return dkey(l[0].start) + "_to_" + dkey(l[l.length - 1].start);
+  }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function detailCsv() {
+    var rows = [["Date", "Day", "Start", "Finish", "Hours (h:mm)", "Hours (decimal)", "Planned", "Done", "Recorded"]];
+    finished().forEach(function (e) {
+      var k = dkey(e.start);
+      rows.push([k, DAYS[parseKey(k).getDay()], hhmm(e.start), hhmm(e.end), hm(dur(e)), dec(dur(e)), e.planned, e.done, e.late ? "Entered afterwards" : "Logged live"]);
+    });
+    return csv(rows);
+  }
+  function dailyCsv() {
+    var rows = [["Week starting", "Date", "Day", "Sessions", "Hours (h:mm)", "Hours (decimal)", "Done"]];
+    groupDays(finished()).forEach(function (d) {
+      rows.push([mondayOf(d.key), d.key, DAYS[parseKey(d.key).getDay()], d.items.length, hm(d.ms), dec(d.ms),
+        d.items.map(function (e) { return e.done; }).filter(Boolean).join(" | ")]);
+    });
+    return csv(rows);
+  }
+  function timesheetHtml() {
+    var days = groupDays(finished()), total = days.reduce(function (a, d) { return a + d.ms; }, 0), weeks = groupWeeks(days);
+    var afterwards = finished().some(function (e) { return e.late; });
+    var b = [];
+    b.push('<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Timesheet</title><style>' +
+      'body{font:14px/1.45 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111;max-width:860px;margin:24px auto;padding:0 16px}' +
+      'h1{font-size:22px;margin:0 0 4px}.meta{color:#444;margin:0 0 18px}table{border-collapse:collapse;width:100%;margin-bottom:18px}' +
+      'th,td{border:1px solid #bbb;padding:6px 8px;text-align:left;vertical-align:top}th{background:#eee;font-size:12px;text-transform:uppercase;letter-spacing:.04em}' +
+      'td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}.sub td{background:#f6f6f6;font-weight:600}' +
+      '.sig{display:flex;gap:40px;margin-top:40px}.sig div{flex:1;border-top:1px solid #111;padding-top:4px;font-size:12px}.note{font-size:12px;color:#555}' +
+      '@media print{body{margin:0}}</style></head><body>');
+    b.push('<h1>Timesheet</h1><p class="meta">' + esc(profile.name) + (profile.employer ? " &middot; " + esc(profile.employer) : "") + "<br>" +
+      (days.length ? esc(prettyDate(days[0].key)) + " to " + esc(prettyDate(days[days.length - 1].key)) : "No entries") +
+      " &middot; Total " + hm(total) + " (" + dec(total) + " hours)</p>");
+    b.push("<table><thead><tr><th>Date</th><th>Time</th><th>Planned</th><th>Done</th><th>Hours</th></tr></thead><tbody>");
+    days.forEach(function (d) {
+      d.items.forEach(function (e, i) {
+        b.push("<tr><td>" + (i === 0 ? esc(prettyDate(d.key)) : "") + "</td><td>" + hhmm(e.start) + "&ndash;" + hhmm(e.end) + (e.late ? " &dagger;" : "") +
+          "</td><td>" + esc(e.planned) + "</td><td>" + esc(e.done) + '</td><td class="n">' + hm(dur(e)) + "</td></tr>");
+      });
+      b.push('<tr class="sub"><td colspan="4">Day total</td><td class="n">' + hm(d.ms) + "</td></tr>");
+    });
+    b.push("</tbody></table>");
+    b.push("<table><thead><tr><th>Week starting</th><th>Days worked</th><th>Hours</th></tr></thead><tbody>");
+    weeks.forEach(function (w) { b.push("<tr><td>" + esc(prettyDate(w.key)) + '</td><td class="n">' + w.days + '</td><td class="n">' + hm(w.ms) + " (" + dec(w.ms) + ")</td></tr>"); });
+    b.push('<tr class="sub"><td>Total</td><td></td><td class="n">' + hm(total) + " (" + dec(total) + ")</td></tr></tbody></table>");
+    if (afterwards) b.push('<p class="note">&dagger; Entered afterwards from memory or records, not logged live.</p>');
+    b.push('<div class="sig"><div>Employee signature and date</div><div>Employer signature and date</div></div>');
+    b.push('<p class="note">Generated ' + esc(prettyDate(todayKey())) + " from Hours Log.</p></body></html>");
+    return b.join("");
+  }
+  function offer(filename, data, label) {
+    var m = $("#expMsg");
+    if (!finished().length) { say(m, "There are no finished entries in this range to export."); return; }
+    if (!dl) {
+      try {
+        var mime = /\.csv$/.test(filename) ? "text/csv;charset=utf-8" : "text/html;charset=utf-8";
+        var url = URL.createObjectURL(new Blob([data], { type: mime }));
+        var a = document.createElement("a"); a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+        say(m, label + " downloaded.", true);
+      } catch (e) { say(m, "Could not download the file."); }
+      return;
+    }
+    say(m, "");
+    dl.save({ filename: filename, data: data }).then(function () { say(m, label + " saved.", true); }).catch(function (err) {
+      if (err && err.code === "declined") say(m, "Not saved.");
+      else say(m, "Could not save the file here (" + ((err && err.code) || "error") + ").");
+    });
+  }
+  $("#expTimesheet").addEventListener("click", function () { offer("timesheet_" + rangeLabel() + ".html", timesheetHtml(), "Timesheet"); });
+  $("#expDetail").addEventListener("click", function () { offer("hours_entries_" + rangeLabel() + ".csv", detailCsv(), "Entries file"); });
+  $("#expDaily").addEventListener("click", function () { offer("hours_daily_" + rangeLabel() + ".csv", dailyCsv(), "Daily totals file"); });
+  $("#pname").addEventListener("input", saveProfile);
+  $("#pemp").addEventListener("input", saveProfile);
+
+  /* ---------- boot ---------- */
+  function setStatus() {
+    $("#status").textContent = mode === "db" ? "Saved to your account, available on any device"
+      : mode === "local" ? "Saved in this browser only" : "Loading…";
+  }
+  function useCap(n) {
+    try { return window.claude && window.claude.use ? window.claude.use(n).catch(function () { return null; }) : Promise.resolve(null); }
+    catch (e) { return Promise.resolve(null); }
+  }
+  function goLocal() {
+    mode = "local"; db = null;
+    var saved = lsGet(LS_ENTRIES); if (Array.isArray(saved)) entries = saved;
+    var p = lsGet(LS_PROFILE); if (p) { profile = p; }
+    $("#pname").value = profile.name; $("#pemp").value = profile.employer;
+    setStatus(); renderAll();
+  }
+  function boot() {
+    var t = todayKey();
+    $("#addDate").value = t;
+    $("#pname").value = profile.name; $("#pemp").value = profile.employer;
+    applyPreset("week");
+    Promise.all([useCap("db"), useCap("downloads")]).then(function (r) {
+      dl = r[1];
+      if (!r[0]) { goLocal(); return; }
+      db = r[0]; mode = "db"; setStatus();
+      var failed = setTimeout(function () { if (!entries.length) say($("#expMsg"), "Entries are taking a while to load."); }, 10000);
+      db.collection("entries").onSnapshot(function (snap) {
+        clearTimeout(failed);
+        entries = snap.docs.map(function (d) { var x = d.data() || {}; x.id = d.id; return x; })
+          .filter(function (x) { return typeof x.start === "number"; });
+        renderAll();
+      }, function () { clearTimeout(failed); say($("#expMsg"), "Could not load saved entries. Reload the page to try again."); });
+      db.doc("meta/profile").onSnapshot(function (snap) {
+        if (snap.exists) {
+          var p = snap.data() || {};
+          profile = { name: p.name != null ? p.name : profile.name, employer: p.employer != null ? p.employer : profile.employer };
+          if (document.activeElement !== $("#pname")) $("#pname").value = profile.name;
+          if (document.activeElement !== $("#pemp")) $("#pemp").value = profile.employer;
+        }
+      }, function () {});
+    });
+  }
+  boot();
+})();
+</script>
+
+</body></html>
